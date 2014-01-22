@@ -39,6 +39,12 @@ static uint64_t rootdir_size(const struct exfat* ef)
 		   to indicate this */
 		rootdir_cluster = exfat_next_cluster(ef, ef->root, rootdir_cluster);
 	}
+	if (rootdir_cluster != EXFAT_CLUSTER_END)
+	{
+		exfat_error("bad cluster %#x while reading root directory",
+				rootdir_cluster);
+		return 0;
+	}
 	return clusters * CLUSTER_SIZE(*ef->sb);
 }
 
@@ -212,17 +218,17 @@ int exfat_mount(struct exfat* ef, const char* spec, const char* options)
 	if (ef->sb->fat_count != 1)
 	{
 		exfat_close(ef->dev);
-		free(ef->sb);
 		exfat_error("unsupported FAT count: %hhu", ef->sb->fat_count);
+		free(ef->sb);
 		return -EIO;
 	}
 	/* officially exFAT supports cluster size up to 32 MB */
 	if ((int) ef->sb->sector_bits + (int) ef->sb->spc_bits > 25)
 	{
 		exfat_close(ef->dev);
-		free(ef->sb);
 		exfat_error("too big cluster size: 2^%d",
 				(int) ef->sb->sector_bits + (int) ef->sb->spc_bits);
+		free(ef->sb);
 		return -EIO;
 	}
 
@@ -260,6 +266,14 @@ int exfat_mount(struct exfat* ef, const char* spec, const char* options)
 	ef->root->fptr_cluster = ef->root->start_cluster;
 	ef->root->name[0] = cpu_to_le16('\0');
 	ef->root->size = rootdir_size(ef);
+	if (ef->root->size == 0)
+	{
+		free(ef->root);
+		free(ef->zero_cluster);
+		exfat_close(ef->dev);
+		free(ef->sb);
+		return -EIO;
+	}
 	/* exFAT does not have time attributes for the root directory */
 	ef->root->mtime = 0;
 	ef->root->atime = 0;
